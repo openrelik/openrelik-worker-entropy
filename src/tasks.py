@@ -15,6 +15,7 @@
 import csv
 import io
 import math
+import os
 
 from openrelik_worker_common.file_utils import create_output_file
 from openrelik_worker_common.reporting import Report
@@ -29,6 +30,9 @@ TASK_NAME = "openrelik-worker-entropy.tasks.entropy"
 # Default value for high entropy
 HIGH_ENTROPY_THRESHOLD = 7.0
 
+# Default value for the maximum file size to compute entropy
+MAX_FILE_SIZE_MB = 100 # 100MB
+
 # Task metadata for registration in the core system.
 TASK_METADATA = {
     "display_name": "High Entropy",
@@ -37,9 +41,16 @@ TASK_METADATA = {
     # by the user will be available to the task function when executing (task_config).
     "task_config": [
         {
-            "name": "threshold",
+            "name": "entropy-threshold",
             "label": "Entropy threshold value",
             "description": f"Entropy threshold value. (default is {HIGH_ENTROPY_THRESHOLD})",
+            "type": "string",
+            "require": False,
+        },
+        {
+            "name": "max-filesize",
+            "label": "Maximum size",
+            "description": f"Maximum size (in MB) of files this will compute the entropy of (default is {MAX_FILE_SIZE_MB}MB)",
             "type": "string",
             "require": False,
         }
@@ -91,18 +102,29 @@ def run_entropy_task(
 
     high_entropy_files = []
 
-    high_entropy_thershold = task_config.get("threshold", HIGH_ENTROPY_THRESHOLD)
+    high_entropy_thershold = task_config.get("entropy-threshold") or HIGH_ENTROPY_THRESHOLD
+
+    max_file_size_mb = task_config.get("max-filesize") or MAX_FILE_SIZE_MB
+    skipped_count = 0
 
     string_io = io.StringIO()
     csv_writer = csv.DictWriter(string_io, fieldnames=["path", "entropy"])
     csv_writer.writeheader()
 
     for input_file in input_files:
+        input_file_path = input_file.get("path")
+
+        file_size_mb = os.stat(input_file_path).st_size / 1000 / 1000
+        if file_size_mb > max_file_size_mb:
+            skipped_count += 1
+            continue
+
         with open(input_file.get("path"), "rb") as fh:
             filename = input_file.get("display_name")
+
             entropy = calculate_entropy(fh.read())
             csv_writer.writerow({"path": filename, "entropy": str(entropy)})
-            if entropy >= HIGH_ENTROPY_THRESHOLD:
+            if entropy >= high_entropy_thershold:
                 high_entropy_files.append([filename, entropy])
 
     csv_result = create_output_file(
@@ -117,7 +139,8 @@ def run_entropy_task(
     task_report = Report("Entropy analyzer report")
     results_summary = (
         f"Found {len(high_entropy_files)} files "
-        f"with high entropy (>{HIGH_ENTROPY_THRESHOLD})."
+        f"with high entropy (>{high_entropy_thershold}).\n"
+        f"Skipped {skipped_count} files because their size is over the {max_file_size_mb}MB limit."
     )
     task_report.summary = results_summary
     summary_section = task_report.add_section()
