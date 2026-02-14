@@ -1,3 +1,7 @@
+> [!CAUTION]  
+> # NOTICE - DO NOT USE
+> This repository has been archived and moved to https://github.com/openrelik/openrelik-workers/
+
 <!--
 README for the OpenRelik Worker Template
 
